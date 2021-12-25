@@ -3,7 +3,7 @@
 #include "TFT_eSPI.h"
 #include <Keypad.h>
 #include <string.h>
-#include "qrcode.h"
+#include "qrcode2.h"
 #include "Bitcoin.h"
 #include <Hash.h>
 #include <Conversion.h>
@@ -14,12 +14,13 @@
 ////////CHANGE! USE LNURLPoS EXTENSION IN LNBITS////////
 ////////////////////////////////////////////////////////
 
-String baseURL = "https://fastapi.satoshigo.app/lnurlpos/api/v1/lnurl/8vMSF3EsX8fvN9CzGtEXj6";
-String key = "BHUjF46VKrJ83xc4A7cnbQ";
-String currency = "USD";
+String server = "https://lnbits.com/";
+String posId = "azefreaegregt";
+String key = "tryteyhtyrjyju";
+String currency = "EUR";
 
 //////////////KEYPAD///////////////////
-bool isLilyGoKeyboard = false;
+bool isLilyGoKeyboard = true;
 
 //////////////SLEEP SETTINGS///////////////////
 bool isSleepEnabled = true;
@@ -95,16 +96,16 @@ char keys[rows][cols] = {
 //byte colPins[cols] = {17, 22, 21}; //connect to the column pinouts of the keypad
 
 //LilyGO T-Display-Keyboard
-//byte rowPins[rows] = {21, 27, 26, 22}; //connect to the row pinouts of the keypad
-//byte colPins[cols] = {33, 32, 25}; //connect to the column pinouts of the keypad
+byte rowPins[rows] = {21, 27, 26, 22}; //connect to the row pinouts of the keypad
+byte colPins[cols] = {33, 32, 25}; //connect to the column pinouts of the keypad
 
 // 4 x 4 keypad setup
 //byte rowPins[rows] = {21, 22, 17, 2}; //connect to the row pinouts of the keypad
 //byte colPins[cols] = {15, 13, 12}; //connect to the column pinouts of the keypad
 
 //Small keypad setup
-byte rowPins[rows] = {21, 22, 17, 2}; //connect to the row pinouts of the keypad
-byte colPins[cols] = {15, 13, 12};    //connect to the column pinouts of the keypad
+//byte rowPins[rows] = {21, 22, 17, 2}; //connect to the row pinouts of the keypad
+//byte colPins[cols] = {15, 13, 12};    //connect to the column pinouts of the keypad
 
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, rows, cols);
 int checker = 0;
@@ -146,10 +147,11 @@ void loop() {
 
   while (cntr != true){
     maybeSleepDevice();
-    displayBatteryVoltage(false);
+    displayBatteryVoltage(true);
     char key = keypad.getKey();
     if (key != NO_KEY)
     {
+      Serial.println("test " + key);
       isPretendSleeping = false;
       timeOfLastInteraction = millis();
       virtkey = String(key);
@@ -499,18 +501,22 @@ void makeLNURL()
   {
     nonce[i] = random(256);
   }
-  byte payload[51]; // 51 bytes is max one can get with xor-encryption
-  size_t payload_len = xor_encrypt(payload, sizeof(payload), (uint8_t *)key.c_str(), key.length(), nonce, sizeof(nonce), randomPin, inputs.toInt());
-  preparedURL = baseURL + "?p=";
-  preparedURL += toBase64(payload, payload_len, BASE64_URLSAFE | BASE64_NOPADDING);
+  byte payload[8];
+  encode_data(payload, nonce, randomPin, inputs.toInt());
+  preparedURL = server + "/lnurlpos/api/v1/lnurl/";
+  preparedURL += toHex(nonce,8);
+  preparedURL += "/";
+  preparedURL += toHex(payload, 8);
+  preparedURL += "/";
+  preparedURL += posId;
   Serial.println(preparedURL);
   char Buf[200];
   preparedURL.toCharArray(Buf, 200);
   char *url = Buf;
-  byte *data = (byte *)calloc(strlen(url) * 2, sizeof(byte));
+  byte * data = (byte *)calloc(strlen(url)*2, sizeof(byte));
   size_t len = 0;
   int res = convert_bits(data, &len, 5, (byte *)url, strlen(url), 8, 1);
-  char *charLnurl = (char *)calloc(strlen(url) * 2, sizeof(byte));
+  char * charLnurl = (char *)calloc(strlen(url)*2, sizeof(byte));
   bech32_encode(charLnurl, "lnurl", data, len);
   to_upper(charLnurl);
   lnurl = charLnurl;
@@ -566,4 +572,17 @@ int xor_encrypt(uint8_t * output, size_t outlen, uint8_t * key, size_t keylen, u
   cur += 8;
   // return number of bytes written to the output
   return cur;
+}
+
+void encode_data(byte output[8], byte nonce[8], int pin, int amount_in_cents){
+  SHA256 h;
+  h.write(nonce, 8);
+  h.write((byte *)key.c_str(), key.length());
+  h.end(output);
+  output[0] = output[0] ^ ((byte)(pin & 0xFF));
+  output[1] = output[1] ^ ((byte)(pin >> 8));
+  for(int i=0; i<4; i++){
+    output[2+i] = output[2+i] ^ ((byte)(amount_in_cents & 0xFF));
+    amount_in_cents = amount_in_cents >> 8;
+  }
 }
